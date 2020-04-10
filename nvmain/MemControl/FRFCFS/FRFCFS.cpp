@@ -56,7 +56,7 @@ FRFCFS::FRFCFS( )
 	
 	//EDFPCscheme
     encodeFlag = false;
-    compressIndex = 2;//0:DCW 1:FPC 2:BDI 3:DFPC
+    compressIndex = 4;//0:DCW 1:FPC 2:BDI 3:DFPC 4:HFPC
     bit_write_before = 0;
     bit_write = 0;
     
@@ -692,6 +692,10 @@ bool FRFCFS::GeneralCompress (NVMainRequest *request, uint64_t compress)
             //DFPC
 			resFlag = DFPCCompress(request, _blockSize);
             break;
+        case 4:
+            resFlag = HFPCCompress(request,_blockSize/4,true);
+            HFPCCompress(request,_blockSize/4,false);
+            break;
         default:
             break;
     }
@@ -758,7 +762,7 @@ bool FRFCFS::Word2Byte (NVMainRequest *request, bool flag, uint64_t size, uint64
     }
     //std::cout<<std::endl;
     
-    if(flag && (bytePos!=comSize))//compressible newdata
+    if(flag && (bytePos<=comSize))//compressible newdata
     {
         request->data.SetComSize(bytePos);
     }
@@ -766,6 +770,173 @@ bool FRFCFS::Word2Byte (NVMainRequest *request, bool flag, uint64_t size, uint64
     
     return true;
 }
+//huffman fpc static version1
+
+bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
+    //GetHuffCode,对64B的cacheline ，16*32bits 每32bits 采样一下，总共采样16个看pattern频率
+    // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
+    //here outside we still trans size/4 ,so here size*4 means size outside
+    //then values[i] is a 32bits thing
+    uint64_t * values = convertByte2Word(request, flag, size*4, 4);
+    uint64_t i;
+    uint64_t words[16];
+    uint64_t wordPos[16]; //0~8 chars
+    uint64_t comSize = 0;
+    bool comFlag = false;
+    int huffbit=0;
+    uint64_t Huffreq[7]={0};
+    uint64_t HuffCode[7]={0};
+    for (i = 0; i < size; i++)
+    {
+        if(values[i]==0){
+            Huffreq[0]++;
+            continue;
+        }
+        if(my_abs((int)(values[i])) <= 0xFF){
+            Huffreq[1]++;
+            continue;
+        }
+        if(my_abs((int)(values[i])) <= 0xFFFF){
+            Huffreq[2]++;
+            continue;
+        }
+        if(((values[i]) & 0xFFFF) == 0 ){
+            Huffreq[3]++;
+            continue;
+        }
+        if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
+             && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
+            Huffreq[4]++;
+            continue;
+        }
+        uint64_t byte0 = (values[i]) & 0xFF;
+        uint64_t byte1 = (values[i] >> 8) & 0xFF;
+        uint64_t byte2 = (values[i] >> 16) & 0xFF;
+        uint64_t byte3 = (values[i] >> 24) & 0xFF;
+        if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
+            Huffreq[5]++;
+            continue;
+        }
+        Huffreq[6]++;
+    }
+    for (int i = 0; i < 7; i++)
+    {
+        std::cout<<"huffmancode["<<i<<"] is"<< Huffreq[i]<<"\t";
+    }
+    printf("\n");
+    char name[7] = {'a','b','c','d','e','f','g'};
+    
+    map<char, uint64_t> mapCh;
+
+    for (int i = 0; i < 7; i++)
+    {
+        mapCh.insert(map<char,uint64_t>::value_type(name[i],Huffreq[i]));
+    }
+    HuffmanTree huffTree;
+
+    huffTree.Input(mapCh);
+    //此时有用的就是veccode里面的。
+
+
+
+    for (i=0;i<size;i++){
+        //这里先暂时这么写，但是它明明只有111这种三位的prefix，偏要统一用4bits来存就很费解,这样的话huffman的节省无法体现了
+        //这里word[i]先只存实际值,用huffbit来存使用的bits数
+        //00 -> all zero
+        if(values[i] == 0){
+            // words[i] = values[i] + 0x0;
+            words[i] = values[i] + strtol(huffTree.veccode[name[0]].c_str(),NULL,2);
+            wordPos[i] = 1;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree.veccode[name[0]].size();
+            continue;
+        }
+
+        // 01 8bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFF){
+            words[i] = my_abs((int)(values[i])) + strtol(huffTree.veccode[name[1]].c_str(),NULL,2);
+            wordPos[i] = 3;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree.veccode[name[1]].size();
+            continue;
+        }
+        // 110 16bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFFFF){
+            // words[i] = my_abs((int)(values[i])) + 0x40000;
+            words[i] = my_abs((int)(values[i])) + strtol(huffTree.veccode[name[2]].c_str(),NULL,2);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree.veccode[name[2]].size();
+            continue;
+        }
+        //100  32bits
+        if(((values[i]) & 0xFFFF) == 0 ){
+            // words[i] = (values[i] >> 16) + 0x40000;
+            words[i] = (values[i] >> 16) + strtol(huffTree.veccode[name[3]].c_str(),NULL,2);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree.veccode[name[3]].size();
+            continue;
+        }
+        //101 00ab00cd类
+        if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
+             && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
+            words[i] = my_abs((int)((values[i] >> 8))) + my_abs((int)((values[i]) & 0xFFFF)) + strtol(huffTree.veccode[name[4]].c_str(),NULL,2);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree.veccode[name[4]].size();
+            continue;
+        }
+        //1110 重复类
+        uint64_t byte0 = (values[i]) & 0xFF;
+        uint64_t byte1 = (values[i] >> 8) & 0xFF;
+        uint64_t byte2 = (values[i] >> 16) & 0xFF;
+        uint64_t byte3 = (values[i] >> 24) & 0xFF;
+        if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
+            words[i] = byte0 + + strtol(huffTree.veccode[name[5]].c_str(),NULL,2);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=4;
+            huffbit += huffTree.veccode[name[5]].size();
+            continue;
+        }
+        //1111
+        words[i] = values[i];
+        wordPos[i] = 8;
+        //这里huffbit不用加因为有一bit是是否压缩的
+        comSize += wordPos[i];
+    }
+    //这里我们把prefix加上去
+    comSize += huffbit/4;
+    if(comSize % 2 == 1)
+        comSize++;
+    comSize /= 2;
+    if(comSize < (size*4))
+    {
+        comFlag = true;
+    }
+    
+    //6 bytes for 3 bit per every 4-byte word in a 64 byte cache line
+    free(values);
+    values = NULL;
+    
+    if(comFlag)
+        Word2Byte(request, flag, size, comSize, words, wordPos);
+    
+    
+    
+    return comFlag;
+
+
+    
+
+}
+
 
 bool FRFCFS::FPCCompress(NVMainRequest *request, uint64_t size, bool flag ){
     uint64_t * values = convertByte2Word(request, flag, size*4, 4);
@@ -882,6 +1053,7 @@ uint64_t FRFCFS::multBaseCompression ( uint64_t * values, uint64_t size, uint64_
     uint64_t limit = 0;
     uint64_t BASES = 2;
     //define the appropriate size for the mask
+    //size = 8,blimit = 1 , bsize = 8
     switch(blimit){
         case 1:
             limit = 0xFF;
@@ -896,11 +1068,13 @@ uint64_t FRFCFS::multBaseCompression ( uint64_t * values, uint64_t size, uint64_
             break;
 
     }
-    uint64_t mbases [2];
+    uint64_t mbases[2]={0};
     uint64_t baseCount = 1;
     mbases[0] = 0;
     uint64_t i,j;
     for (i = 0; i < size; i++) {
+        //long long int 64bits
+        //只要有一个values的值和base的区别大，就设置为第二个基
         if( my_llabs((long long int)(mbases[0] -  values[i])) > limit ){
             // add new base
             mbases[1] = values[i];
@@ -911,28 +1085,37 @@ uint64_t FRFCFS::multBaseCompression ( uint64_t * values, uint64_t size, uint64_
     }
     // find how many elements can be compressed with mbases
     uint64_t compCount = 0;
+    //这里的bsize是BASE的size，如果大于4,nums为2
+    //bsize = 8 ,nums=2 curwords[0]=
     uint64_t nums = (bsize > 4)?2:1;
+    //对于每个基来说
     for (pos = 0; pos < baseCount; pos++)
     {
         for(i = 0; i < nums; i++)
+        //对于每个基的nums来说
         {
             currWords[pos*nums + i] = (values[pos] >> (32*(1-i))) & 0xFFFFFFFF;
             currWordPos[pos*nums + i] = (bsize*2 > 8)?8:(bsize*2);
+            //例如这里currwords就是values[0/1]的高32，低32位
         }
     }
     pos = pos * nums;
+    //pos = 2*pos
     for (i = 0; i < size; i++) {
         for(j = 0; j <  baseCount; j++){
+            //对于每个基而言，如果相减小于limit当前字为delta，且占位为blimit的两倍，blimit=1 相当于limit = 0xff
             if( my_llabs((long long int)(mbases[j] -  values[i])) <= limit ){
                 //limit * 2
                 currWords[pos] = my_llabs((long long int)(mbases[j] -  values[i])) & limit;
                 currWordPos[pos++] = blimit * 2;
+                //blimit = 1 说明用了0xff共8位去压缩， 8/4 = 2 = 1*2
                 compCount++;
                 break;
             }
         }
     }
     //return compressed size
+    //总共有size个，压缩了compCount个，压缩的大小为blimit，未压缩的大小为bsize
     uint64_t mCompSize = blimit * compCount + bsize * BASES + (size - compCount) * bsize;
     if(compCount < size)
         return size * bsize;
@@ -941,7 +1124,10 @@ uint64_t FRFCFS::multBaseCompression ( uint64_t * values, uint64_t size, uint64_
 
 bool FRFCFS::BDICompress (NVMainRequest *request, uint64_t _blockSize, bool flag )
 {
+    //blocksize就是req的data的size，一般是64
     uint64_t * values = convertByte2Word(request, flag, _blockSize, 8);
+    //把64个指向uint8的转换成8个word,一个word64bits
+    //也就是论文中说的8*8bytes
     uint64_t bestCSize = _blockSize;
     uint64_t currCSize = _blockSize;
     uint64_t i, pos, bestPos;
@@ -952,14 +1138,18 @@ bool FRFCFS::BDICompress (NVMainRequest *request, uint64_t _blockSize, bool flag
     uint64_t currWordPos[35]; //0~8 chars
     bool comFlag = false;
     bestPos = 16;
+    //看一条cacheline内的差别，比较value[0]~value[8]
     if( isSameValuePackable( values, _blockSize / 8))
     {
         currCSize = 8;
     }
     if(bestCSize > currCSize)
     {
+        //这里我也不太清楚到底是哪种，大概是全0或者全相同中的一种
+        //bestPos就=2，word[1]为value高32bits，word[2]低32bits
         bestCSize = currCSize;
         bestPos = bestCSize / 4;
+        //假设这个value 1-8是一样的, bestPos = 8/4 =2
         words[0] = 0x0;
         wordPos[0] = 1;
         for(i = 0; i < bestPos; i++)
@@ -967,8 +1157,13 @@ bool FRFCFS::BDICompress (NVMainRequest *request, uint64_t _blockSize, bool flag
             words[i+1] = (values[i/2] >> (32*(1-i%2))) & 0xFFFFFFFF;
             wordPos[i+1] = 8;
         }
+        //words[1] = value[0]高32位
+        //words[2] = value[0]低32位
         bestPos++;
+        //然后bestPos=3
     }
+    //传入values,8,1,8,....
+    //总共有size = 8个，blimit=1,bsize=8为不压缩的大小
     currCSize = multBaseCompression( values, _blockSize / 8, 1, 8, currWords, currWordPos, pos);
     if(bestCSize > currCSize)
     {
@@ -1090,7 +1285,9 @@ bool FRFCFS::BDICompress (NVMainRequest *request, uint64_t _blockSize, bool flag
 bool FRFCFS::DFPCCompress(NVMainRequest *request, uint64_t _blockSize )
 {
     if(mem_writes < granularities)
+    //如果写次数小于粒度
 	{
+        //所以这里为什么要除以4呢
         FPCIdentify(request, _blockSize / 4);
         BDIIdentify(request, _blockSize);
         Sample(request, _blockSize);
@@ -1126,7 +1323,9 @@ bool FRFCFS::DynamicCompress(NVMainRequest *request, uint64_t size, bool flag  )
 uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool flag )
 {
     uint64_t * values = convertByte2Word(request, flag, size*4, 8);
-    uint64_t i, j, k;
+    //这里传进来的就是size/4,乘了4以后又变成了 values指向req里面指向uint8的类型的个数
+    //所以这里就变成了
+    uint64_t i;
     
     uint64_t words[16];
     uint64_t wordPos[16]; //0~8 chars
@@ -1143,12 +1342,15 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
         comSize = 1;
         free(values);
         values = NULL;
+        //这里的word2byte是没办法继续压缩的，但是我很不理解为什么要4bits的压缩
         Word2Byte(request, flag, comSize, comSize, words, wordPos);
+        //这里req就直接返回了，所以req改了也没关系
         return comSize;
     }
     free(values);
-    
+    //重新，这时候step=4
     values = convertByte2Word(request, flag, size*4, 4);
+    //下面这个size实际上就是实际的32位的个数，就是有多少个values，因为 size是/4过的
     for (i = 0; i < size; i++) {
         // 001
         if(values[i] == 0){
@@ -1158,7 +1360,9 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
             continue;
         }
         dynamicFlag = true;
-        for(j = 0; j < mask_pos && dynamicFlag; j++)
+        //默认mask_pos=0
+        //这里的两个函数要等提取模式看了再回来看到底有什么用
+        for(int j = 0; j < mask_pos && dynamicFlag; j++)
         {
             int compressible_char = 8 - compressibleChars[j];
             if(compressible_char < 4 && ((my_abs((int)(values[i])) & masks[j]) == 0))
@@ -1166,7 +1370,7 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
                 words[i] = ((j+4)<<(compressible_char*4));
                 uint64_t mask = masks[j];
                 uint64_t word = my_abs((int)(values[i]));
-                for(k = 0; k < compressible_char; k++)
+                for(int k = 0; k < compressible_char; k++)
                 {
                     while((mask & 0xF) != 0)
                     {
@@ -1186,6 +1390,7 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
         if(!dynamicFlag)
             continue;
         // 011
+        //低16位的
         if(my_abs((int)(values[i])) <= 0xFFFF){
             words[i] = my_abs((int)(values[i])) + 0x30000;
             wordPos[i] = 5;
@@ -1193,13 +1398,14 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
             continue;
         }
         //100  
+        // 高16位的
         if(((values[i]) & 0xFFFF) == 0 ){
             words[i] = (values[i] >> 16) + 0x40000;
             wordPos[i] = 5;
             comSize += wordPos[i];
             continue;
         }
-        for(j = 0; j < mask_pos && dynamicFlag; j++)
+        for(int j = 0; j < mask_pos && dynamicFlag; j++)
         {
             int compressible_char = 8 - compressibleChars[j];
             if(compressible_char >= 4 && ((my_abs((int)(values[i])) & masks[j]) == 0))
@@ -1208,7 +1414,7 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
                 words[i] = ((j+4)<<(compressible_char*4));
                 uint64_t mask = masks[j];
                 uint64_t word = my_abs((int)(values[i]));
-                for(k = 0; k < compressible_char; k++)
+                for(int k = 0; k < compressible_char; k++)
                 {
                     while((mask & 0xF) != 0)
                     {
@@ -1228,6 +1434,8 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
             continue;
         
         //110
+        //这个是有1+BDICOUNT个的bool型数组,default = false
+        //110代表重复aa/aa/aa/aa
         if(special_pattern_flag[0])
         {
             uint64_t byte0 = (values[i]) & 0xFF;
@@ -1241,10 +1449,12 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
                 continue;
             }
         }
+        //上面这些都不行就是压缩不了
         words[i] = values[i];
         wordPos[i] = 8;
         comSize += wordPos[i];
     }
+    //因为一直都是4bits 4bits的来的
     if(comSize % 2 == 1)
         comSize++;
     comSize /= 2;
@@ -1279,6 +1489,8 @@ uint64_t FRFCFS::DynamicBDICompress(NVMainRequest *request, uint64_t _blockSize,
     uint64_t currWords[34];
     uint64_t currWordPos[34]; //0~8 chars
     bestPos = 0;
+    //这里的special_pattern_flag用处暂时不清楚
+    //好像之所以是BDI+1,因为【0】用在FPC上了
     if(special_pattern_flag[1] || special_pattern_flag[2] || special_pattern_flag[3] || special_pattern_flag[4])
     {
         if( isSameValuePackable( values, _blockSize / 8))
@@ -1293,6 +1505,7 @@ uint64_t FRFCFS::DynamicBDICompress(NVMainRequest *request, uint64_t _blockSize,
             {
                 words[i] = (values[i/2] >> (32*(1-i%2))) & 0xFFFFFFFF;
                 wordPos[i] = 8;
+                //这里的8个实际上是32bits
             }
         }
         currCSize = multBaseCompression( values, _blockSize / 8, 1, 8, currWords, currWordPos, pos);
@@ -1391,6 +1604,7 @@ uint64_t FRFCFS::DynamicBDICompress(NVMainRequest *request, uint64_t _blockSize,
     values = NULL;
     if(bestCSize < _blockSize)
     {
+        //word2byte第一步就是 把comsize设置成bestcsize，然后如果可以压缩就改小comsize
         Word2Byte(request, flag, bestPos, bestCSize, words, wordPos);
         if(flag)
             bestCSize = request->data.GetComSize();
@@ -1415,6 +1629,7 @@ bool FRFCFS::StaticCompress(NVMainRequest *request, uint64_t size, bool flag )
     if( isZeroPackable( values, size*4 / 8))
     {
         // 000
+        // 000 静态全0压缩
         words[0] = 0;
         wordPos[0] = 1;
         comFlag = true;
@@ -1490,6 +1705,7 @@ uint64_t FRFCFS::FPCIdentify(NVMainRequest *request, uint64_t size){
             continue;
         }
         //101
+        //00ab00cc有补码
         if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
              && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
             FPCCounter[1]++;
@@ -1601,6 +1817,10 @@ uint64_t FRFCFS::BDIIdentify (NVMainRequest *request, uint64_t _blockSize)
 
 }
 
+
+
+
+//这个sampler是对64B的cacheline ，16*32bits 每4bits 采样一下，总共采样128个看哪些为0
 uint64_t FRFCFS::Sample(NVMainRequest *request, uint64_t _blockSize)
 {
 	uint64_t num = 0;
@@ -1628,6 +1848,7 @@ uint64_t FRFCFS::ExtractPattern()
     bool flag;
     uint64_t lower_bound, upper_bound, threshold;//, word_size;
     int word_count = SAMPLECOUNT/DYNAMICWORDSIZE; // 32-bit word
+    //128 / 8 = 16 因为一个字是32位就是 8个4bits
     int total_pattern_count = FPCCOUNT+BDICOUNT+word_count;
     
     uint8_t SamplePatterns[SAMPLECOUNT];
@@ -1654,6 +1875,7 @@ uint64_t FRFCFS::ExtractPattern()
         //(FPCCounter[i] + 3 * FPCCounter[i] / 8) * 64 / 4;
         std::cout<<"FPCCompressBytes["<<i<<"]: "<<CompressBytes[i]<<std::endl;
         FPCCounter[i] = 0;
+        //提取完了就置零
     }
     
     for(i = 0; i < BDICOUNT; i++)
@@ -1667,6 +1889,7 @@ uint64_t FRFCFS::ExtractPattern()
         //CompressBytes[i + FPCCOUNT] = (BDICounter[i] - 3 * BDIpatterncounter / 8)/64;
         if(i < 4)
             CompressBytes[0 + FPCCOUNT] += BDICounter[i];
+            //这里是前4个除以8的
         else if(i < BDICOUNT - 1)
             CompressBytes[4 + FPCCOUNT] += BDICounter[i];
         else
