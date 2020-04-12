@@ -46,6 +46,141 @@
 #include <iostream>
 #include <set>
 #include <assert.h>
+#include <stdio.h>
+#include <vector>
+#include <string>
+#include <map>
+#include <algorithm>
+using namespace std;
+struct HuffmanNode {
+    HuffmanNode(char k, uint64_t w) : key(k), weight(w) ,
+                                 left(nullptr),
+                                 right(nullptr)
+    {}
+    HuffmanNode(uint64_t w) : key('\0'), weight(w) ,
+                                 left(nullptr),
+                                 right(nullptr)
+    {}
+    char key;
+    uint64_t weight;
+    HuffmanNode * left;
+    HuffmanNode * right;
+};
+
+class ComHuffmanNode {
+public:
+    bool operator()(HuffmanNode * e1, HuffmanNode * e2) {
+        return e1->weight > e2->weight;
+    }
+};
+
+class HuffmanTree {
+public:
+    HuffmanTree() {
+        DecodeTree = nullptr;
+    }
+    ~HuffmanTree() {
+        ClearDecodeTree();
+    }
+
+    void Input(const std::map<char, uint64_t> & mapCh) {
+        vector<HuffmanNode*> vecHufNode;
+        for (auto itr=mapCh.begin(); itr!=mapCh.end(); ++itr) {
+            vecHufNode.push_back(new HuffmanNode(itr->first, itr->second));
+        }
+
+        make_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+
+        while (vecHufNode.size() > 1) {
+            HuffmanNode * right = vecHufNode.front();
+            pop_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+            vecHufNode.pop_back();
+
+            HuffmanNode * left = vecHufNode.front();
+            pop_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+            vecHufNode.pop_back();
+
+            HuffmanNode * parent = new HuffmanNode(left->weight + right->weight);
+            parent->left = left;
+            parent->right = right;
+
+            vecHufNode.push_back(parent);
+            push_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+        }
+
+        if (!vecHufNode.empty()) {
+            DecodeTree = vecHufNode.front();
+        }
+
+        veccode.resize(std::numeric_limits<char>().max());
+
+        string code;
+
+        BuildCode(DecodeTree, code);
+
+    }
+
+    void ClearDecodeTree(HuffmanNode * pNode) {
+        if (pNode == nullptr) return;
+
+        ClearDecodeTree(pNode->left);
+        ClearDecodeTree(pNode->right);
+        delete pNode;
+    }
+
+    void ClearDecodeTree() {
+        ClearDecodeTree(DecodeTree);
+        DecodeTree = nullptr;
+    }
+
+    void BuildCode(HuffmanNode * pNode, std::string & code) {
+        if (pNode->left == NULL) {
+            veccode[pNode->key] = code;
+            return ;
+        }
+
+        code.push_back('0');
+        BuildCode(pNode->left, code);
+        code.pop_back();
+        code.push_back('1');
+        BuildCode(pNode->right, code);
+        code.pop_back();
+    }
+
+    std::string Decode(const string & strB) {
+        string strC;
+
+        HuffmanNode * pNode = DecodeTree;
+        for (unsigned int i=0; i<strB.size(); ++i) {
+            if (strB[i] == '0') {
+                pNode = pNode->left;
+            } else {
+                pNode = pNode->right;
+            }
+
+            if (pNode->left == NULL) {
+                strC.push_back(pNode->key);
+                pNode = DecodeTree;
+            }
+        }
+
+        return strC;
+    }
+
+    std::string GetCode(const string & strA) {
+        string strB;
+        for (unsigned int i=0; i<strA.size(); ++i) {
+            strB += veccode[strA[i]];
+        }
+
+        return strB;
+    }
+
+    std::vector<string> veccode;
+private:
+    HuffmanNode * DecodeTree;
+    
+};
 
 using namespace NVM;
 
@@ -214,6 +349,8 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
             comsize = req->data.GetComSize();
         }
         compress_ratio += (size * 1.0 / comsize);
+        // std::cout<< "size is "<< size<<"comsize is"<< comsize << "so compress_ratio is"<< compress_ratio <<std::endl;
+
         /*
         if(req->data.IsCompressed())
         {
@@ -764,6 +901,7 @@ bool FRFCFS::Word2Byte (NVMainRequest *request, bool flag, uint64_t size, uint64
     
     if(flag && (bytePos<=comSize))//compressible newdata
     {
+        // std::cout << "yes! bytePos is"<<bytePos<<"and comsize is "<<comSize <<std::endl;
         request->data.SetComSize(bytePos);
     }
     //dataFlag = !dataFlag;
@@ -771,7 +909,75 @@ bool FRFCFS::Word2Byte (NVMainRequest *request, bool flag, uint64_t size, uint64
     return true;
 }
 //huffman fpc static version1
-
+bool FRFCFS::Word2ByteHuff (NVMainRequest *request, bool flag, uint64_t size, uint64_t comSize, uint64_t *words, uint64_t *wordPos,int huffbit)//flag: false-olddata true-newdata
+{
+    uint64_t i,j;
+    uint8_t dataChar = 0;
+    uint8_t dataByte = 0;
+    bool dataFlag = false;//false--low true--high
+    uint64_t bytePos = 0;
+    
+    if(flag)//compressible newdata
+    {
+        request->data.SetComSize(comSize);
+    }
+    else
+    {
+        request->oldData.SetComSize(64);
+    }
+    
+    for (i = 0; i < size; i++)
+    {
+        for(j = wordPos[i]; j>0; j--)
+        {
+            dataChar = (words[i] >> ((j-1)*4)) & 0xF;
+            if(dataFlag)
+            {
+                dataByte = dataByte | dataChar;
+                if(flag)
+                {
+                    request->data.SetComByte(bytePos, dataByte);
+                }
+                else
+                {
+                    request->oldData.SetComByte(bytePos, dataByte);
+                }
+                bytePos++;
+                //std::cout<<dataByte<<" ";
+            }
+            else
+            {
+                dataByte = dataChar << 4;
+            }
+            dataFlag = !dataFlag;
+        }
+    }
+    if(dataFlag)
+    {
+        if(flag)
+        {
+            request->data.SetComByte(bytePos, dataByte);
+            request->data.SetHalfFlag(true);
+        }
+        else
+        {
+            request->oldData.SetComByte(bytePos, dataByte);
+            request->oldData.SetHalfFlag(true);
+        }
+        bytePos++;
+        //std::cout<<dataByte;
+    }
+    //std::cout<<std::endl;
+    
+    if(flag && ((bytePos+huffbit/4)<=comSize))//compressible newdata
+    {
+        // std::cout << "yes! bytePos+huffbit/4"<<bytePos+huffbit/4<<"and comsize is "<<comSize <<std::endl;
+        request->data.SetComSize((bytePos+huffbit/4)+1);
+    }
+    //dataFlag = !dataFlag;
+    
+    return true;
+}
 bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     //GetHuffCode,对64B的cacheline ，16*32bits 每32bits 采样一下，总共采样16个看pattern频率
     // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
@@ -785,7 +991,6 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     bool comFlag = false;
     int huffbit=0;
     uint64_t Huffreq[7]={0};
-    uint64_t HuffCode[7]={0};
     for (i = 0; i < size; i++)
     {
         if(values[i]==0){
@@ -819,11 +1024,11 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         }
         Huffreq[6]++;
     }
-    for (int i = 0; i < 7; i++)
-    {
-        std::cout<<"huffmancode["<<i<<"] is"<< Huffreq[i]<<"\t";
-    }
-    printf("\n");
+    // for (int i = 0; i < 7; i++)
+    // {
+    //     std::cout<<"huffmancode["<<i<<"] is"<< Huffreq[i]<<"\t";
+    // }
+    // printf("\n");
     char name[7] = {'a','b','c','d','e','f','g'};
     
     map<char, uint64_t> mapCh;
@@ -836,17 +1041,20 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
 
     huffTree.Input(mapCh);
     //此时有用的就是veccode里面的。
-
+    // for (int i = 0; i < 7; i++) {
+    //     uint64_t temp = strtol(huffTree.veccode[name[i]].c_str(),NULL,10);
+    //     std::cout << temp <<"and bits are" <<huffTree.veccode[name[i]].size() <<std::endl;
+    // }
 
 
     for (i=0;i<size;i++){
-        //这里先暂时这么写，但是它明明只有111这种三位的prefix，偏要统一用4bits来存就很费解,这样的话huffman的节省无法体现了
         //这里word[i]先只存实际值,用huffbit来存使用的bits数
         //00 -> all zero
         if(values[i] == 0){
             // words[i] = values[i] + 0x0;
             words[i] = values[i] + strtol(huffTree.veccode[name[0]].c_str(),NULL,2);
-            wordPos[i] = 1;
+            // wordPos[i] = 1;
+            wordPos[i] = 0;
             comSize += wordPos[i];
             // huffbit +=2;
             huffbit += huffTree.veccode[name[0]].size();
@@ -855,7 +1063,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
 
         // 01 8bits符号扩展
         if(my_abs((int)(values[i])) <= 0xFF){
-            words[i] = my_abs((int)(values[i])) + strtol(huffTree.veccode[name[1]].c_str(),NULL,2);
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree.veccode[name[1]].c_str(),NULL,2)<<8);
             wordPos[i] = 3;
             comSize += wordPos[i];
             // huffbit +=2;
@@ -865,7 +1073,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         // 110 16bits符号扩展
         if(my_abs((int)(values[i])) <= 0xFFFF){
             // words[i] = my_abs((int)(values[i])) + 0x40000;
-            words[i] = my_abs((int)(values[i])) + strtol(huffTree.veccode[name[2]].c_str(),NULL,2);
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree.veccode[name[2]].c_str(),NULL,2)<<16);
             wordPos[i] = 4;
             comSize += wordPos[i];
             // huffbit +=3;
@@ -875,7 +1083,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         //100  32bits
         if(((values[i]) & 0xFFFF) == 0 ){
             // words[i] = (values[i] >> 16) + 0x40000;
-            words[i] = (values[i] >> 16) + strtol(huffTree.veccode[name[3]].c_str(),NULL,2);
+            words[i] = (values[i] >> 16) + (strtol(huffTree.veccode[name[3]].c_str(),NULL,2)<<16);
             wordPos[i] = 4;
             comSize += wordPos[i];
             // huffbit +=3;
@@ -885,7 +1093,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         //101 00ab00cd类
         if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
              && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
-            words[i] = my_abs((int)((values[i] >> 8))) + my_abs((int)((values[i]) & 0xFFFF)) + strtol(huffTree.veccode[name[4]].c_str(),NULL,2);
+            words[i] = my_abs((int)((values[i] >> 8))) + my_abs((int)((values[i]) & 0xFFFF)) + (strtol(huffTree.veccode[name[4]].c_str(),NULL,2)<<32);
             wordPos[i] = 4;
             comSize += wordPos[i];
             // huffbit +=3;
@@ -898,7 +1106,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         uint64_t byte2 = (values[i] >> 16) & 0xFF;
         uint64_t byte3 = (values[i] >> 24) & 0xFF;
         if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
-            words[i] = byte0 + + strtol(huffTree.veccode[name[5]].c_str(),NULL,2);
+            words[i] = byte0 +  (strtol(huffTree.veccode[name[5]].c_str(),NULL,2)<<8);
             wordPos[i] = 2;
             comSize += wordPos[i];
             // huffbit +=4;
@@ -912,7 +1120,10 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         comSize += wordPos[i];
     }
     //这里我们把prefix加上去
+    // std::cout << "now huffbit is"<<huffbit <<std::endl;
     comSize += huffbit/4;
+    if (comSize==0)
+        comSize=1;
     if(comSize % 2 == 1)
         comSize++;
     comSize /= 2;
@@ -926,7 +1137,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     values = NULL;
     
     if(comFlag)
-        Word2Byte(request, flag, size, comSize, words, wordPos);
+        Word2ByteHuff(request, flag, size, comSize, words, wordPos,huffbit);
     
     
     
@@ -1873,7 +2084,7 @@ uint64_t FRFCFS::ExtractPattern()
             CompressBytes[i] = FPCCounter[i]*4 - FPCCounter[i] - FPCCounter[i] * 3 / 8;
         //FPCCompressBytes[i] = FPCCounter[i] * 22;
         //(FPCCounter[i] + 3 * FPCCounter[i] / 8) * 64 / 4;
-        std::cout<<"FPCCompressBytes["<<i<<"]: "<<CompressBytes[i]<<std::endl;
+        // std::cout<<"FPCCompressBytes["<<i<<"]: "<<CompressBytes[i]<<std::endl;
         FPCCounter[i] = 0;
         //提取完了就置零
     }
@@ -2016,7 +2227,7 @@ uint64_t FRFCFS::ExtractPattern()
                         pattern = pattern >> 1;
                     }
                     masks[mask_pos] = mask;
-                    std::cout<<" mask: "<<mask<<" ";
+                    // std::cout<<" mask: "<<mask<<" ";
                     compressibleChars[mask_pos++] = 6;
                     
                     break;
@@ -2032,7 +2243,7 @@ uint64_t FRFCFS::ExtractPattern()
                         pattern = pattern >> 1;
                     }
                     masks[mask_pos] = mask;
-                    std::cout<<" mask: "<<mask<<" ";
+                    // std::cout<<" mask: "<<mask<<" ";
                     compressibleChars[mask_pos++] = 4;
                     
                     break;
@@ -2088,8 +2299,8 @@ uint64_t FRFCFS::ExtractPattern()
 				}
 				pattern = pattern >> 1;
 			}
-            std::cout<<" mask: "<<mask<<" ";
-            std::cout<<" comChar: "<<compressible_chars[DynamicPatterns[count] - FPCCOUNT - BDICOUNT]<<" ";
+            // std::cout<<" mask: "<<mask<<" ";
+            // std::cout<<" comChar: "<<compressible_chars[DynamicPatterns[count] - FPCCOUNT - BDICOUNT]<<" ";
             masks[mask_pos] = mask;
             compressibleChars[mask_pos++] = compressible_chars[DynamicPatterns[count] - FPCCOUNT - BDICOUNT];
             
@@ -2099,7 +2310,7 @@ uint64_t FRFCFS::ExtractPattern()
     printf("\n");
     for(i = 0; i<mask_pos; i++)
     {
-        std::cout<<" mask: "<<masks[i]<<" comChar: "<<compressibleChars[i]<<std::endl;
+        // std::cout<<" mask: "<<masks[i]<<" comChar: "<<compressibleChars[i]<<std::endl;
     }
     sample_flag = false;
 	return 1;
