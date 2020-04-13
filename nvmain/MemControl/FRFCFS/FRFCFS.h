@@ -82,7 +82,8 @@ class FRFCFS : public MemoryController
     uint64_t bit_write;
     uint64_t bit_write_before;
     double compress_ratio;
-    
+    double average_compress_ratio;
+    double total_compress_time;
     uint64_t my_llabs ( int64_t x );
     uint64_t my_abs ( int x );
     bool GeneralCompress (NVMainRequest *request, uint64_t compress);

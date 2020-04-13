@@ -191,7 +191,7 @@ FRFCFS::FRFCFS( )
 	
 	//EDFPCscheme
     encodeFlag = false;
-    compressIndex = 4;//0:DCW 1:FPC 2:BDI 3:DFPC 4:HFPC
+    compressIndex = 3;//0:DCW 1:FPC 2:BDI 3:DFPC 4:HFPC
     bit_write_before = 0;
     bit_write = 0;
     
@@ -201,7 +201,8 @@ FRFCFS::FRFCFS( )
     threshold_factor = 0.4;
 	granularities = 5000000;
     compress_ratio = 0.0f;
-    
+    average_compress_ratio = 0.0f;
+    total_compress_time = 1.0f;
     mask_pos = 0;
     
     
@@ -272,7 +273,7 @@ void FRFCFS::RegisterStats( )
     AddStat(bit_write);
     AddStat(bit_write_before);
     AddStat(compress_ratio);
-    
+    AddStat(average_compress_ratio);
 	
     AddStat(mem_reads);
     AddStat(mem_writes);
@@ -349,7 +350,10 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
             comsize = req->data.GetComSize();
         }
         compress_ratio += (size * 1.0 / comsize);
+        average_compress_ratio = ((size * 1.0 / comsize)+average_compress_ratio*(total_compress_time-1))/(total_compress_time);
+        total_compress_time++;
         // std::cout<< "size is "<< size<<"comsize is"<< comsize << "so compress_ratio is"<< compress_ratio <<std::endl;
+        // std::cout<<"average_compress_ratio is"<<average_compress_ratio<<"total_compression time is"<<total_compress_time<<std::endl;
 
         /*
         if(req->data.IsCompressed())
@@ -1701,7 +1705,7 @@ uint64_t FRFCFS::DynamicBDICompress(NVMainRequest *request, uint64_t _blockSize,
     uint64_t currWordPos[34]; //0~8 chars
     bestPos = 0;
     //这里的special_pattern_flag用处暂时不清楚
-    //好像之所以是BDI+1,因为【0】用在FPC上了
+    //好像之所以是BDI+1,因为[0]用在FPC上了
     if(special_pattern_flag[1] || special_pattern_flag[2] || special_pattern_flag[3] || special_pattern_flag[4])
     {
         if( isSameValuePackable( values, _blockSize / 8))
@@ -2198,7 +2202,7 @@ uint64_t FRFCFS::ExtractPattern()
                 CompressBytes[pos + FPCCOUNT + BDICOUNT] =   min_compression_counter * compressible_char / 2 - min_compression_counter * 3 / 8;//min_compression_counter * compressible_char / 2 - min_compression_counter * 3 / 8) / (DYNAMICWORDSIZE / 2);
                 //min_compression_counter * (70 - 8 * compressible_char);
                 //SampleCompressBytes[pos] = min_compression_counter * (70 - 8 * compressible_char);
-                std::cout<<"extracted_pattern: "<<extracted_patterns[pos]<<" CompressBytes["<<pos + FPCCOUNT + BDICOUNT<<"]: "<<CompressBytes[pos + FPCCOUNT + BDICOUNT]<<std::endl;
+                // std::cout<<"extracted_pattern: "<<extracted_patterns[pos]<<" CompressBytes["<<pos + FPCCOUNT + BDICOUNT<<"]: "<<CompressBytes[pos + FPCCOUNT + BDICOUNT]<<std::endl;
                 pos++;
             }
             //(min_compression_counter * compressible_char / 2 - min_compression_counter * 3 / 8) / (DYNAMICWORDSIZE / 2);
