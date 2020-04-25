@@ -995,12 +995,30 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
     //here outside we still trans size/4 ,so here size*4 means size outside
     //then values[i] is a 32bits thing
-    uint64_t * values = convertByte2Word(request, flag, size*4, 4);
+    uint64_t * values = convertByte2Word(request, flag, size*4, 8);
     uint64_t i;
+    
     uint64_t words[16];
     uint64_t wordPos[16]; //0~8 chars
     uint64_t comSize = 0;
     bool comFlag = false;
+    
+    if( isZeroPackable( values, size*4 / 8))
+    {
+        // 000
+        // 000 静态全0压缩
+        std::cout<<"64 all zeros" <<std::endl;
+        words[0] = 0;
+        wordPos[0] = 1;
+        comFlag = true;
+        comSize = 1;
+        free(values);
+        values = NULL;
+        Word2Byte(request, flag, comSize, comSize, words, wordPos);
+        return comFlag;
+    }
+    free(values);
+    values = convertByte2Word(request, flag, size*4, 4);
     int huffbit=0;
     uint64_t Huffreq[7]={0};
     for (i = 0; i < size; i++)
