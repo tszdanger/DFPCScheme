@@ -191,7 +191,7 @@ FRFCFS::FRFCFS( )
 	
 	//EDFPCscheme
     encodeFlag = false;
-    compressIndex = 3;//0:DCW 1:FPC 2:BDI 3:DFPC 4:HFPC
+    compressIndex = 5;//0:DCW 1:FPC 2:BDI 3:DFPC 4:HFPC 5:DHFPC
     bit_write_before = 0;
     bit_write = 0;
     
@@ -202,9 +202,8 @@ FRFCFS::FRFCFS( )
 	granularities = 5000000;
     compress_ratio = 0.0f;
     average_compress_ratio = 0.0f;
-    total_compress_time = 1.0f;
+    total_compress_time = 1;
     mask_pos = 0;
-    
     
 	for(int i=0;i<FPCCOUNT;i++)
 		FPCCounter[i] = 0;
@@ -352,8 +351,14 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
         compress_ratio += (size * 1.0 / comsize);
         average_compress_ratio = ((size * 1.0 / comsize)+average_compress_ratio*(total_compress_time-1))/(total_compress_time);
         total_compress_time++;
-        // std::cout<< "size is "<< size<<"comsize is"<< comsize << "so compress_ratio is"<< compress_ratio <<std::endl;
-        // std::cout<<"average_compress_ratio is"<<average_compress_ratio<<"total_compression time is"<<total_compress_time<<std::endl;
+        if(total_compress_time%100000==0)
+        {
+         std::cout<< "size is "<< size<<"comsize is"<< comsize << "so compress_ratio is"<< compress_ratio <<std::endl;
+         std::cout<<"average_compress_ratio is"<<average_compress_ratio<<"total_compression time is"<<total_compress_time<<std::endl;
+         std::cout<<"averagelatency is"<<averageLatency<<std::endl;
+        }
+
+
 
         /*
         if(req->data.IsCompressed())
@@ -836,6 +841,9 @@ bool FRFCFS::GeneralCompress (NVMainRequest *request, uint64_t compress)
         case 4:
             resFlag = HFPCCompress(request,_blockSize/4,true);
             HFPCCompress(request,_blockSize/4,false);
+            break;
+        case 5:
+            resFlag = HDFPCCompress(request, _blockSize);
             break;
         default:
             break;
@@ -1517,6 +1525,51 @@ bool FRFCFS::DFPCCompress(NVMainRequest *request, uint64_t _blockSize )
 	}
 }
 
+bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
+{
+    if(mem_writes < granularities)
+    //如果写次数小于粒度
+	{
+        //所以这里为什么要除以4呢
+        FPCIdentify(request, _blockSize / 4);
+        BDIIdentify(request, _blockSize);
+        Sample(request, _blockSize);
+        StaticCompress(request, _blockSize/4, false);
+        HFPCCompress(request,_blockSize/4,false);
+		// return StaticCompress(request, _blockSize/4, true);
+        return HFPCCompress(request,_blockSize/4,true);
+	}else
+	{
+        if(sample_flag)
+            ExtractPattern();
+        DynamicHuffCompress(request, _blockSize, false);
+		return DynamicHuffCompress(request, _blockSize, true);
+	}
+}
+
+bool FRFCFS::DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool flag  )
+{
+    
+    uint64_t FPC_pattern_size=0, BDI_pattern_size=0,HFPC_pattern_size=0;
+    
+    FPC_pattern_size = DynamicFPCCompress(request, size/4, flag);
+    HFPC_pattern_size = HFPCCompress(request,size/4,flag);
+    if(FPC_pattern_size<HFPC_pattern_size)
+    {
+        printf("fpc is better than hfpc?");
+    }
+    BDI_pattern_size = DynamicBDICompress(request, size, flag);
+    if(HFPC_pattern_size < BDI_pattern_size)
+    {
+        HFPCCompress(request,size/4,flag);
+    }
+    if(flag)
+        return request->data.IsCompressed();
+    else
+        return request->oldData.IsCompressed();
+    
+}
+
 bool FRFCFS::DynamicCompress(NVMainRequest *request, uint64_t size, bool flag  )
 {
     
@@ -1551,15 +1604,17 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
     if( isZeroPackable( values, size*4 / 8))
     {
         // 000
+        //这里是把每个req划分成64bits，若都为0
         words[0] = 0;
         wordPos[0] = 1;
         comFlag = true;
         comSize = 1;
         free(values);
         values = NULL;
-        //这里的word2byte是没办法继续压缩的，但是我很不理解为什么要4bits的压缩
+        //这里的word2byte是没办法继续压缩的
         Word2Byte(request, flag, comSize, comSize, words, wordPos);
         //这里req就直接返回了，所以req改了也没关系
+        
         return comSize;
     }
     free(values);
@@ -1640,6 +1695,7 @@ uint64_t FRFCFS::DynamicFPCCompress(NVMainRequest *request, uint64_t size, bool 
                 }
                 //words[i] = my_abs((int)(values[i])) + ((j+4)<<(compressible_char*4));
                 wordPos[i] = 1 + compressible_char;
+                //这样真的有压缩过吗？
                 comSize += wordPos[i];
                 dynamicFlag = false;
                 break;
@@ -2068,6 +2124,7 @@ uint64_t FRFCFS::ExtractPattern()
     
     uint8_t SamplePatterns[SAMPLECOUNT];
     pattern_num = word_count / 2;
+    //这个除以二是什么鬼
     uint8_t patterns_temp[word_count];
     int compressible_chars[word_count];
     uint8_t extracted_patterns[word_count];
@@ -2113,6 +2170,9 @@ uint64_t FRFCFS::ExtractPattern()
         BDICounter[i] = 0;
     }
     //    BDICounter[i] = BDICounter[i];
+    //一直在思考前两步到底在干嘛，Dynamicpatterns[i] -> i ， 但是compressbytes 只有012，3，7，8有值
+    //fpc conter里面存的是32bits符合pattren的个数，但是bdicounter里面村的是压缩节省的size（bits/byte暂时没看）
+
 	
     //sample
     lower_bound = upper_bound = SampleCounter[0];
@@ -2136,10 +2196,10 @@ uint64_t FRFCFS::ExtractPattern()
         printf("%d\t", SamplePatterns[i]);
     }
     printf("\n");
-    
+    //这里根据128个采样的0的数据得到了samplepatterns的值
     //determine word_size
     
-    for(i = 0; i < word_count; i++)
+    for(i = 0; i < word_count ; i++)
     {
         patterns_temp[i] = 0;
         for(j = 0; j < DYNAMICWORDSIZE; j++)
@@ -2232,6 +2292,7 @@ uint64_t FRFCFS::ExtractPattern()
                     }
                     masks[mask_pos] = mask;
                     // std::cout<<" mask: "<<mask<<" ";
+                    //这时候Mask是0x ffffff00
                     compressibleChars[mask_pos++] = 6;
                     
                     break;
@@ -2248,6 +2309,7 @@ uint64_t FRFCFS::ExtractPattern()
                     }
                     masks[mask_pos] = mask;
                     // std::cout<<" mask: "<<mask<<" ";
+                    // 这时候mask是0xff00ff00
                     compressibleChars[mask_pos++] = 4;
                     
                     break;
