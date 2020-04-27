@@ -1020,7 +1020,8 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     free(values);
     values = convertByte2Word(request, flag, size*4, 4);
     int huffbit=0;
-    uint64_t Huffreq[7]={0};
+    uint64_t Huffreq[8]={0};
+    //增加4bits的情况
     for (i = 0; i < size; i++)
     {
         if(values[i]==0){
@@ -1044,6 +1045,10 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
             Huffreq[4]++;
             continue;
         }
+        if(my_abs((int)(values[i])) <= 0xF){
+            Huffreq[7]++;
+            continue;
+        }
         uint64_t byte0 = (values[i]) & 0xFF;
         uint64_t byte1 = (values[i] >> 8) & 0xFF;
         uint64_t byte2 = (values[i] >> 16) & 0xFF;
@@ -1059,11 +1064,12 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     //     std::cout<<"huffmancode["<<i<<"] is"<< Huffreq[i]<<"\t";
     // }
     // printf("\n");
-    char name[7] = {'a','b','c','d','e','f','g'};
+    //h对应新加的4bits
+    char name[7] = {'a','b','c','d','e','f','g','h'};
     
     map<char, uint64_t> mapCh;
 
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 8; i++)
     {
         mapCh.insert(map<char,uint64_t>::value_type(name[i],Huffreq[i]));
     }
@@ -1098,6 +1104,14 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
             comSize += wordPos[i];
             // huffbit +=2;
             huffbit += huffTree.veccode[name[1]].size();
+            continue;
+        }
+        if(my_abs((int)(values[i])) <= 0xF){
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree.veccode[name[7]].c_str(),NULL,2)<<4);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree.veccode[name[7]].size();
             continue;
         }
         // 110 16bits符号扩展
