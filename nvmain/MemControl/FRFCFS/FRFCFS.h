@@ -135,6 +135,8 @@ class FRFCFS : public MemoryController
     bool HDFPCCompress(NVMainRequest *request, uint64_t _blockSize );
     bool DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool flag  );
 
+    uint64_t pattern_ana[9]={0};
+
 };
 
 

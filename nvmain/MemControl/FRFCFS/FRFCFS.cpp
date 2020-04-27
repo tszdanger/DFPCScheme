@@ -330,19 +330,75 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
         
         uint64_t bitsChange = 0;
         uint64_t bitsCom = 0;
-        //uint64_t i;
+        // uint64_t i;
         uint64_t size;
         uint64_t comsize;
-        
+        // char str[20];
         comsize = size = req->data.GetSize();
-        /*printf("data: ");
-        for(i = 0; i < size; i++)
-        {
-            printf("%d ", req->data.GetByte(i));
-        }
-        printf("\n");
-        */
+        // printf("data: ");
+        // for(uint64_t i = 0; i < size; i++)
+        // {
+        //     printf("%02X", req->data.GetByte(i));
+        //     // sprintf(str, 20, "%X", req->data.GetByte(i));
+        //     // puts(str);
+
+        // }
+        // printf("\n");
+        
 		//isCom = GeneralCompress(req, 3);
+        
+        
+        //统计一下这些模式有多少个,仅FPC那种不包含bdi
+        
+        uint64_t * values1 = convertByte2Word(req, false, 64, 8);
+        if( isZeroPackable( values1, 64 / 8))
+        {
+            pattern_ana[8]+=1;
+        }
+        free(values1);
+        values1 = convertByte2Word(req, false, size*4, 4);
+        for (int i = 0; i < size; i++)
+    {
+        if(values1[i]==0){
+            pattern_ana[0]++;
+            continue;
+        }
+        if(my_abs((int)(values1[i])) <= 0xFF){
+            pattern_ana[1]++;
+            continue;
+        }
+        if(my_abs((int)(values1[i])) <= 0xFFFF){
+            pattern_ana[2]++;
+            continue;
+        }
+        if(((values1[i]) & 0xFFFF) == 0 ){
+            pattern_ana[3]++;
+            continue;
+        }
+        if( my_abs((int)((values1[i]) & 0xFFFF)) <= 0xFF
+             && my_abs((int)((values1[i] >> 16) & 0xFFFF)) <= 0xFF){
+            pattern_ana[4]++;
+            continue;
+        }
+        if(my_abs((int)(values1[i])) <= 0xF){
+            pattern_ana[7]++;
+            continue;
+        }
+        uint64_t byte0 = (values1[i]) & 0xFF;
+        uint64_t byte1 = (values1[i] >> 8) & 0xFF;
+        uint64_t byte2 = (values1[i] >> 16) & 0xFF;
+        uint64_t byte3 = (values1[i] >> 24) & 0xFF;
+        if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
+            pattern_ana[5]++;
+            continue;
+        }
+        pattern_ana[6]++;
+    }
+
+
+
+
+
         GeneralCompress(req, compressIndex);
         if(req->data.IsCompressed())
         {
@@ -351,11 +407,18 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
         compress_ratio += (size * 1.0 / comsize);
         average_compress_ratio = ((size * 1.0 / comsize)+average_compress_ratio*(total_compress_time-1))/(total_compress_time);
         total_compress_time++;
+        //100000输出一下模式统计
         if(total_compress_time%100000==0)
         {
          std::cout<< "size is "<< size<<"comsize is"<< comsize << "so compress_ratio is"<< compress_ratio <<std::endl;
          std::cout<<"average_compress_ratio is"<<average_compress_ratio<<"total_compression time is"<<total_compress_time<<std::endl;
          std::cout<<"averagelatency is"<<averageLatency<<std::endl;
+         
+         std::cout<< "模式数目分别为: "<<std::endl;
+         for(int j=0;j<9;j++){
+            std::cout<< pattern_ana[j] <<"\t";
+         }
+         printf("\n");
         }
 
 
@@ -1007,7 +1070,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     {
         // 000
         // 000 静态全0压缩
-        std::cout<<"64 all zeros" <<std::endl;
+        // std::cout<<"64 all zeros" <<std::endl;
         words[0] = 0;
         wordPos[0] = 1;
         comFlag = true;
@@ -1065,7 +1128,7 @@ bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     // }
     // printf("\n");
     //h对应新加的4bits
-    char name[7] = {'a','b','c','d','e','f','g','h'};
+    char name[8] = {'a','b','c','d','e','f','g','h'};
     
     map<char, uint64_t> mapCh;
 
