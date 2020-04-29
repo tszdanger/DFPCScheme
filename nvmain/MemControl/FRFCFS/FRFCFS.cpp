@@ -234,6 +234,10 @@ FRFCFS::FRFCFS( )
     write_pauses = 0;
 
     starvation_precharges = 0;
+    
+    
+    //默认没有建树
+    buildtree = false;
 
     psInterval = 0;
 
@@ -414,10 +418,10 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
          std::cout<<"average_compress_ratio is"<<average_compress_ratio<<"total_compression time is"<<total_compress_time<<std::endl;
          std::cout<<"averagelatency is"<<averageLatency<<std::endl;
          
-         std::cout<< "模式数目分别为: "<<std::endl;
-         for(int j=0;j<9;j++){
-            std::cout<< pattern_ana[j] <<"\t";
-         }
+        //  std::cout<< "模式数目分别为: "<<std::endl;
+        //  for(int j=0;j<9;j++){
+        //     std::cout<< pattern_ana[j] <<"\t";
+        //  }
          printf("\n");
         }
 
@@ -1053,6 +1057,150 @@ bool FRFCFS::Word2ByteHuff (NVMainRequest *request, bool flag, uint64_t size, ui
     
     return true;
 }
+
+bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
+    //GetHuffCode,对64B的cacheline ，16*32bits 每32bits 采样一下，总共采样16个看pattern频率
+    // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
+    //here outside we still trans size/4 ,so here size*4 means size outside
+    //then values[i] is a 32bits thing
+    uint64_t * values = convertByte2Word(request, flag, size*4, 8);
+    uint64_t i;
+    
+    uint64_t words[16];
+    uint64_t wordPos[16]; //0~8 chars
+    uint64_t comSize = 0;
+    bool comFlag = false;
+    
+    if( isZeroPackable( values, size*4 / 8))
+    {
+        // 000
+        // 000 静态全0压缩
+        // std::cout<<"64 all zeros" <<std::endl;
+        words[0] = 0;
+        wordPos[0] = 1;
+        comFlag = true;
+        comSize = 1;
+        free(values);
+        values = NULL;
+        Word2Byte(request, flag, comSize, comSize, words, wordPos);
+        return comFlag;
+    }
+    free(values);
+    values = convertByte2Word(request, flag, size*4, 4);
+    
+
+
+    for (i=0;i<size;i++){
+        //这里word[i]先只存实际值,用huffbit来存使用的bits数
+        //00 -> all zero
+        if(values[i] == 0){
+            // words[i] = values[i] + 0x0;
+            words[i] = values[i] + strtol(huffTree1.veccode[name[0]].c_str(),NULL,2);
+            // wordPos[i] = 1;
+            wordPos[i] = 0;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree1.veccode[name[0]].size();
+            continue;
+        }
+
+        // 01 8bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFF){
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree1.veccode[name[1]].c_str(),NULL,2)<<8);
+            wordPos[i] = 3;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree1.veccode[name[1]].size();
+            continue;
+        }
+        if(my_abs((int)(values[i])) <= 0xF){
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree1.veccode[name[7]].c_str(),NULL,2)<<4);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree1.veccode[name[7]].size();
+            continue;
+        }
+        // 110 16bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFFFF){
+            // words[i] = my_abs((int)(values[i])) + 0x40000;
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree1.veccode[name[2]].c_str(),NULL,2)<<16);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree1.veccode[name[2]].size();
+            continue;
+        }
+        //100  32bits
+        if(((values[i]) & 0xFFFF) == 0 ){
+            // words[i] = (values[i] >> 16) + 0x40000;
+            words[i] = (values[i] >> 16) + (strtol(huffTree1.veccode[name[3]].c_str(),NULL,2)<<16);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree1.veccode[name[3]].size();
+            continue;
+        }
+        //101 00ab00cd类
+        if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
+             && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
+            words[i] = my_abs((int)((values[i] >> 8))) + my_abs((int)((values[i]) & 0xFFFF)) + (strtol(huffTree1.veccode[name[4]].c_str(),NULL,2)<<32);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree1.veccode[name[4]].size();
+            continue;
+        }
+        //1110 重复类
+        uint64_t byte0 = (values[i]) & 0xFF;
+        uint64_t byte1 = (values[i] >> 8) & 0xFF;
+        uint64_t byte2 = (values[i] >> 16) & 0xFF;
+        uint64_t byte3 = (values[i] >> 24) & 0xFF;
+        if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
+            words[i] = byte0 +  (strtol(huffTree1.veccode[name[5]].c_str(),NULL,2)<<8);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=4;
+            huffbit += huffTree1.veccode[name[5]].size();
+            continue;
+        }
+        //1111
+        words[i] = values[i];
+        wordPos[i] = 8;
+        //这里huffbit不用加因为有一bit是是否压缩的
+        comSize += wordPos[i];
+    }
+    //这里我们把prefix加上去
+    // std::cout << "now huffbit is"<<huffbit <<std::endl;
+    comSize += huffbit/4;
+    if (comSize==0)
+        comSize=1;
+    if(comSize % 2 == 1)
+        comSize++;
+    comSize /= 2;
+    if(comSize < (size*4))
+    {
+        comFlag = true;
+    }
+    
+    //6 bytes for 3 bit per every 4-byte word in a 64 byte cache line
+    free(values);
+    values = NULL;
+    
+    if(comFlag)
+        Word2ByteHuff(request, flag, size, comSize, words, wordPos,huffbit);
+    
+    
+    
+    return comFlag;
+
+
+    
+
+}
+
+
+
 bool FRFCFS::HFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     //GetHuffCode,对64B的cacheline ，16*32bits 每32bits 采样一下，总共采样16个看pattern频率
     // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
@@ -1629,26 +1777,52 @@ bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
         FPCIdentify(request, _blockSize / 4);
         BDIIdentify(request, _blockSize);
         Sample(request, _blockSize);
-        StaticCompress(request, _blockSize/4, false);
+        // StaticCompress(request, _blockSize/4, false);
+
         HFPCCompress(request,_blockSize/4,false);
 		// return StaticCompress(request, _blockSize/4, true);
         return HFPCCompress(request,_blockSize/4,true);
 	}else
 	{
+        if (buildtree==false){
+            buildtree = BuildHuffTree(huffTree1,mapCh1);
+            //这里我们新建一棵树
+        }
         if(sample_flag)
             ExtractPattern();
+        
         DynamicHuffCompress(request, _blockSize, false);
 		return DynamicHuffCompress(request, _blockSize, true);
 	}
 }
 
+bool FRFCFS::BuildHuffTree(HuffmanTree &huffTree1,map<char, uint64_t> &mapCh1)
+{
+    char name[8] = {'a','b','c','d','e','f','g','h'};
+    
+    // map<char, uint64_t> mapCh1;
+
+    for (int i = 0; i < 8; i++)
+    {
+        mapCh1.insert(map<char,uint64_t>::value_type(name[i],Huffreq[i]));
+    }
+    // HuffmanTree huffTree1;
+
+    huffTree1.Input(mapCh);
+
+    return true;
+}
+
+
+
+//这里还是求了fpcsize的，如果不求的话或许可以降低延迟？
 bool FRFCFS::DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool flag  )
 {
     
     uint64_t FPC_pattern_size=0, BDI_pattern_size=0,HFPC_pattern_size=0;
     
     FPC_pattern_size = DynamicFPCCompress(request, size/4, flag);
-    HFPC_pattern_size = HFPCCompress(request,size/4,flag);
+    HFPC_pattern_size = PUREHFPCCompress(request,size/4,flag);
     if(FPC_pattern_size<HFPC_pattern_size)
     {
         printf("fpc is better than hfpc?");
@@ -1656,7 +1830,7 @@ bool FRFCFS::DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool fla
     BDI_pattern_size = DynamicBDICompress(request, size, flag);
     if(HFPC_pattern_size < BDI_pattern_size)
     {
-        HFPCCompress(request,size/4,flag);
+        PUREHFPCCompress(request,size/4,flag);
     }
     if(flag)
         return request->data.IsCompressed();

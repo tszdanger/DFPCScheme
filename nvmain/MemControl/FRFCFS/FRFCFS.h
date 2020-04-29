@@ -137,6 +137,11 @@ class FRFCFS : public MemoryController
 
     uint64_t pattern_ana[9]={0};
 
+    bool buildtree;
+    map<char, uint64_t> mapCh1;
+    HuffmanTree huffTree1;
+    bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag);
+
 };
 
 
