@@ -37,11 +37,61 @@
 #include "src/MemoryController.h"
 #include <deque>
 
+#include <map>
+
 //EDFPCscheme
 #define SAMPLECOUNT 128
 #define FPCCOUNT 3
 #define BDICOUNT 8
 #define DYNAMICWORDSIZE 8 //chars
+
+struct HuffmanNode {
+    HuffmanNode(char k, uint64_t w) : key(k), weight(w) ,
+                                 left(nullptr),
+                                 right(nullptr)
+    {}
+    HuffmanNode(uint64_t w) : key('\0'), weight(w) ,
+                                 left(nullptr),
+                                 right(nullptr)
+    {}
+    
+    char key;
+    uint64_t weight;
+    HuffmanNode * left;
+    HuffmanNode * right;
+};
+    class ComHuffmanNode {
+public:
+    bool operator()(HuffmanNode * e1, HuffmanNode * e2);
+    };
+
+    class HuffmanTree {
+public:
+    HuffmanTree() ;
+    ~HuffmanTree() ;
+
+    void Input(const std::map<char, uint64_t> & mapCh) ;
+
+    void ClearDecodeTree(HuffmanNode * pNode);
+
+    void ClearDecodeTree() ;
+
+    void BuildCode(HuffmanNode * pNode, std::string & code);
+
+    std::string Decode(const std::string & strB) ;
+
+    std::string GetCode(const std::string & strA);
+
+    std::vector<std::string> veccode;
+private:
+    HuffmanNode * DecodeTree;
+    
+};
+
+    
+
+
+
 
 namespace NVM {
 
@@ -138,9 +188,10 @@ class FRFCFS : public MemoryController
     uint64_t pattern_ana[9]={0};
 
     bool buildtree;
-    map<char, uint64_t> mapCh1;
+    std::map<char, uint64_t> mapCh1;
     HuffmanTree huffTree1;
-    bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag);
+    bool PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag);
+    bool BuildHuffTree(HuffmanTree &huffTree1,std::map<char, uint64_t> &mapCh1);
 
 };
 

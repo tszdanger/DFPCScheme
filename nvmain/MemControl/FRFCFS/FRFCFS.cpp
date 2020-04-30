@@ -52,38 +52,40 @@
 #include <map>
 #include <algorithm>
 using namespace std;
-struct HuffmanNode {
-    HuffmanNode(char k, uint64_t w) : key(k), weight(w) ,
-                                 left(nullptr),
-                                 right(nullptr)
-    {}
-    HuffmanNode(uint64_t w) : key('\0'), weight(w) ,
-                                 left(nullptr),
-                                 right(nullptr)
-    {}
-    char key;
-    uint64_t weight;
-    HuffmanNode * left;
-    HuffmanNode * right;
-};
+// struct HuffmanNode {
+//     HuffmanNode(char k, uint64_t w) : key(k), weight(w) ,
+//                                  left(nullptr),
+//                                  right(nullptr)
+//     {}
+//     HuffmanNode(uint64_t w) : key('\0'), weight(w) ,
+//                                  left(nullptr),
+//                                  right(nullptr)
+//     {}
+//     char key;
+//     uint64_t weight;
+//     HuffmanNode * left;
+//     HuffmanNode * right;
+// };
 
-class ComHuffmanNode {
-public:
-    bool operator()(HuffmanNode * e1, HuffmanNode * e2) {
+// class ComHuffmanNode {
+// public:
+//     bool operator()(HuffmanNode * e1, HuffmanNode * e2) {
+//         return e1->weight > e2->weight;
+//     }
+// };
+
+
+bool ComHuffmanNode::operator()(HuffmanNode * e1, HuffmanNode * e2) {
         return e1->weight > e2->weight;
     }
-};
 
-class HuffmanTree {
-public:
-    HuffmanTree() {
-        DecodeTree = nullptr;
-    }
-    ~HuffmanTree() {
+HuffmanTree::HuffmanTree(){DecodeTree = nullptr;}
+
+HuffmanTree::~HuffmanTree() {
         ClearDecodeTree();
     }
 
-    void Input(const std::map<char, uint64_t> & mapCh) {
+void HuffmanTree::Input(const std::map<char, uint64_t> & mapCh) {
         vector<HuffmanNode*> vecHufNode;
         for (auto itr=mapCh.begin(); itr!=mapCh.end(); ++itr) {
             vecHufNode.push_back(new HuffmanNode(itr->first, itr->second));
@@ -120,7 +122,7 @@ public:
 
     }
 
-    void ClearDecodeTree(HuffmanNode * pNode) {
+void HuffmanTree::ClearDecodeTree(HuffmanNode * pNode) {
         if (pNode == nullptr) return;
 
         ClearDecodeTree(pNode->left);
@@ -128,12 +130,12 @@ public:
         delete pNode;
     }
 
-    void ClearDecodeTree() {
+void HuffmanTree::ClearDecodeTree() {
         ClearDecodeTree(DecodeTree);
         DecodeTree = nullptr;
     }
 
-    void BuildCode(HuffmanNode * pNode, std::string & code) {
+void HuffmanTree::BuildCode(HuffmanNode * pNode, std::string & code) {
         if (pNode->left == NULL) {
             veccode[pNode->key] = code;
             return ;
@@ -147,7 +149,7 @@ public:
         code.pop_back();
     }
 
-    std::string Decode(const string & strB) {
+std::string HuffmanTree::Decode(const string & strB) {
         string strC;
 
         HuffmanNode * pNode = DecodeTree;
@@ -167,7 +169,7 @@ public:
         return strC;
     }
 
-    std::string GetCode(const string & strA) {
+std::string HuffmanTree::GetCode(const string & strA) {
         string strB;
         for (unsigned int i=0; i<strA.size(); ++i) {
             strB += veccode[strA[i]];
@@ -176,11 +178,114 @@ public:
         return strB;
     }
 
-    std::vector<string> veccode;
-private:
-    HuffmanNode * DecodeTree;
+
+// class HuffmanTree {
+// public:
+//     HuffmanTree() {
+//         DecodeTree = nullptr;
+//     }
+//     ~HuffmanTree() {
+//         ClearDecodeTree();
+//     }
+
+//     void Input(const std::map<char, uint64_t> & mapCh) {
+//         vector<HuffmanNode*> vecHufNode;
+//         for (auto itr=mapCh.begin(); itr!=mapCh.end(); ++itr) {
+//             vecHufNode.push_back(new HuffmanNode(itr->first, itr->second));
+//         }
+
+//         make_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+
+//         while (vecHufNode.size() > 1) {
+//             HuffmanNode * right = vecHufNode.front();
+//             pop_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+//             vecHufNode.pop_back();
+
+//             HuffmanNode * left = vecHufNode.front();
+//             pop_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+//             vecHufNode.pop_back();
+
+//             HuffmanNode * parent = new HuffmanNode(left->weight + right->weight);
+//             parent->left = left;
+//             parent->right = right;
+
+//             vecHufNode.push_back(parent);
+//             push_heap(vecHufNode.begin(), vecHufNode.end(), ComHuffmanNode());
+//         }
+
+//         if (!vecHufNode.empty()) {
+//             DecodeTree = vecHufNode.front();
+//         }
+
+//         veccode.resize(std::numeric_limits<char>().max());
+
+//         string code;
+
+//         BuildCode(DecodeTree, code);
+
+//     }
+
+//     void ClearDecodeTree(HuffmanNode * pNode) {
+//         if (pNode == nullptr) return;
+
+//         ClearDecodeTree(pNode->left);
+//         ClearDecodeTree(pNode->right);
+//         delete pNode;
+//     }
+
+//     void ClearDecodeTree() {
+//         ClearDecodeTree(DecodeTree);
+//         DecodeTree = nullptr;
+//     }
+
+//     void BuildCode(HuffmanNode * pNode, std::string & code) {
+//         if (pNode->left == NULL) {
+//             veccode[pNode->key] = code;
+//             return ;
+//         }
+
+//         code.push_back('0');
+//         BuildCode(pNode->left, code);
+//         code.pop_back();
+//         code.push_back('1');
+//         BuildCode(pNode->right, code);
+//         code.pop_back();
+//     }
+
+//     std::string Decode(const string & strB) {
+//         string strC;
+
+//         HuffmanNode * pNode = DecodeTree;
+//         for (unsigned int i=0; i<strB.size(); ++i) {
+//             if (strB[i] == '0') {
+//                 pNode = pNode->left;
+//             } else {
+//                 pNode = pNode->right;
+//             }
+
+//             if (pNode->left == NULL) {
+//                 strC.push_back(pNode->key);
+//                 pNode = DecodeTree;
+//             }
+//         }
+
+//         return strC;
+//     }
+
+//     std::string GetCode(const string & strA) {
+//         string strB;
+//         for (unsigned int i=0; i<strA.size(); ++i) {
+//             strB += veccode[strA[i]];
+//         }
+
+//         return strB;
+//     }
+
+//     std::vector<string> veccode;
+// private:
+//     HuffmanNode * DecodeTree;
     
-};
+// };
 
 using namespace NVM;
 
@@ -199,7 +304,7 @@ FRFCFS::FRFCFS( )
     sample_flag = true;
     pattern_num = SAMPLECOUNT/DYNAMICWORDSIZE/2;
     threshold_factor = 0.4;
-	granularities = 5000000;
+	granularities = 50000;
     compress_ratio = 0.0f;
     average_compress_ratio = 0.0f;
     total_compress_time = 1;
@@ -238,6 +343,8 @@ FRFCFS::FRFCFS( )
     
     //默认没有建树
     buildtree = false;
+
+    
 
     psInterval = 0;
 
@@ -1063,6 +1170,8 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     // 输出 all zero/8bits符号扩展/16bits符号扩展/32bits/00ab00cd类/重复类/不可压缩类 
     //here outside we still trans size/4 ,so here size*4 means size outside
     //then values[i] is a 32bits thing
+    // printf("进入了PUREHFPCCompress\n");
+
     uint64_t * values = convertByte2Word(request, flag, size*4, 8);
     uint64_t i;
     
@@ -1075,7 +1184,7 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     {
         // 000
         // 000 静态全0压缩
-        // std::cout<<"64 all zeros" <<std::endl;
+        std::cout<<"64 all zeros" <<std::endl;
         words[0] = 0;
         wordPos[0] = 1;
         comFlag = true;
@@ -1087,8 +1196,8 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     }
     free(values);
     values = convertByte2Word(request, flag, size*4, 4);
-    
-
+    int huffbit=0;
+    char name[8] = {'a','b','c','d','e','f','g','h'};
 
     for (i=0;i<size;i++){
         //这里word[i]先只存实际值,用huffbit来存使用的bits数
@@ -1171,7 +1280,7 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         comSize += wordPos[i];
     }
     //这里我们把prefix加上去
-    // std::cout << "now huffbit is"<<huffbit <<std::endl;
+    std::cout << "now huffbit is"<<huffbit <<std::endl;
     comSize += huffbit/4;
     if (comSize==0)
         comSize=1;
@@ -1785,12 +1894,13 @@ bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
 	}else
 	{
         if (buildtree==false){
+            printf("我们终于新建了一棵树\n");
             buildtree = BuildHuffTree(huffTree1,mapCh1);
             //这里我们新建一棵树
         }
         if(sample_flag)
             ExtractPattern();
-        
+        // printf("进入DynamicHuffCompress\n");
         DynamicHuffCompress(request, _blockSize, false);
 		return DynamicHuffCompress(request, _blockSize, true);
 	}
@@ -1803,12 +1913,13 @@ bool FRFCFS::BuildHuffTree(HuffmanTree &huffTree1,map<char, uint64_t> &mapCh1)
     // map<char, uint64_t> mapCh1;
 
     for (int i = 0; i < 8; i++)
-    {
-        mapCh1.insert(map<char,uint64_t>::value_type(name[i],Huffreq[i]));
+    {   
+        std::cout << "pattern"<<pattern_ana[i] <<std::endl;
+        mapCh1.insert(map<char,uint64_t>::value_type(name[i],pattern_ana[i]));
     }
     // HuffmanTree huffTree1;
 
-    huffTree1.Input(mapCh);
+    huffTree1.Input(mapCh1);
 
     return true;
 }
@@ -1820,8 +1931,10 @@ bool FRFCFS::DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool fla
 {
     
     uint64_t FPC_pattern_size=0, BDI_pattern_size=0,HFPC_pattern_size=0;
+    // printf("进入了DynamicHuffCompress\n");
     
     FPC_pattern_size = DynamicFPCCompress(request, size/4, flag);
+    //pure就是那种几千万次做的hufftree
     HFPC_pattern_size = PUREHFPCCompress(request,size/4,flag);
     if(FPC_pattern_size<HFPC_pattern_size)
     {
