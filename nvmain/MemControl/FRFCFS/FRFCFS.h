@@ -192,6 +192,8 @@ class FRFCFS : public MemoryController
     HuffmanTree huffTree1;
     bool PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag);
     bool BuildHuffTree(HuffmanTree &huffTree1,std::map<char, uint64_t> &mapCh1);
+    //在指定采样次数以后就不采样了,降低延迟
+    bool contsample;
 
 };
 

@@ -343,7 +343,8 @@ FRFCFS::FRFCFS( )
     
     //默认没有建树
     buildtree = false;
-
+    //默认需要采样
+    contsample = true;
     
 
     psInterval = 0;
@@ -460,7 +461,7 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
         
         
         //统计一下这些模式有多少个,仅FPC那种不包含bdi
-        
+        if(contsample){
         uint64_t * values1 = convertByte2Word(req, false, 64, 8);
         if( isZeroPackable( values1, 64 / 8))
         {
@@ -505,7 +506,7 @@ bool FRFCFS::IssueCommand( NVMainRequest *req )
         }
         pattern_ana[6]++;
     }
-
+        }
 
 
 
@@ -1883,7 +1884,8 @@ bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
     //如果写次数小于粒度
 	{
         //所以这里为什么要除以4呢
-        FPCIdentify(request, _blockSize / 4);
+        //这里不再fpc static降低延迟
+        // FPCIdentify(request, _blockSize / 4);
         BDIIdentify(request, _blockSize);
         Sample(request, _blockSize);
         // StaticCompress(request, _blockSize/4, false);
@@ -1930,16 +1932,18 @@ bool FRFCFS::BuildHuffTree(HuffmanTree &huffTree1,map<char, uint64_t> &mapCh1)
 bool FRFCFS::DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool flag  )
 {
     
-    uint64_t FPC_pattern_size=0, BDI_pattern_size=0,HFPC_pattern_size=0;
+    // uint64_t FPC_pattern_size=0, BDI_pattern_size=0,HFPC_pattern_size=0;
+    uint64_t  BDI_pattern_size=0,HFPC_pattern_size=0;
+
     // printf("进入了DynamicHuffCompress\n");
     
-    FPC_pattern_size = DynamicFPCCompress(request, size/4, flag);
+    // FPC_pattern_size = DynamicFPCCompress(request, size/4, flag);
     //pure就是那种几千万次做的hufftree
     HFPC_pattern_size = PUREHFPCCompress(request,size/4,flag);
-    if(FPC_pattern_size<HFPC_pattern_size)
-    {
-        printf("fpc is better than hfpc?");
-    }
+    // if(FPC_pattern_size<HFPC_pattern_size)
+    // {
+    //     printf("fpc is better than hfpc?");
+    // }
     BDI_pattern_size = DynamicBDICompress(request, size, flag);
     if(HFPC_pattern_size < BDI_pattern_size)
     {
