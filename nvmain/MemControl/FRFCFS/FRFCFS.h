@@ -186,10 +186,15 @@ class FRFCFS : public MemoryController
     bool DynamicHuffCompress(NVMainRequest *request, uint64_t size, bool flag  );
 
     uint64_t pattern_ana[9]={0};
+    uint64_t pattern_ana0[9]={0};
+    uint64_t pattern_ana2[9]={0};
+
 
     bool buildtree;
     std::map<char, uint64_t> mapCh1;
     HuffmanTree huffTree1;
+    std::map<char, uint64_t> mapCh2;
+    HuffmanTree huffTree2;
     bool PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag);
     bool BuildHuffTree(HuffmanTree &huffTree1,std::map<char, uint64_t> &mapCh1);
     //在指定采样次数以后就不采样了,降低延迟

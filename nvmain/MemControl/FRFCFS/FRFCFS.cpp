@@ -1185,7 +1185,7 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     {
         // 000
         // 000 静态全0压缩
-        std::cout<<"64 all zeros" <<std::endl;
+        // std::cout<<"64 all zeros" <<std::endl;
         words[0] = 0;
         wordPos[0] = 1;
         comFlag = true;
@@ -1200,7 +1200,15 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
     int huffbit=0;
     char name[8] = {'a','b','c','d','e','f','g','h'};
 
-    for (i=0;i<size;i++){
+    //
+    int choice = 0;
+    if(total_compress_time%100000==0){
+        choice = KLCAL(pattern_ana,pattern_ana0,pattern_ana2);
+        std::cout<<"choice is "<< choice<<std::endl;
+    }
+
+    if(choice==1){
+        for (i=0;i<size;i++){
         //这里word[i]先只存实际值,用huffbit来存使用的bits数
         //00 -> all zero
         if(values[i] == 0){
@@ -1280,8 +1288,93 @@ bool FRFCFS::PUREHFPCCompress(NVMainRequest *request, uint64_t size, bool flag){
         //这里huffbit不用加因为有一bit是是否压缩的
         comSize += wordPos[i];
     }
+    }
+
+    else if(choice==2){
+        for (i=0;i<size;i++){
+        //这里word[i]先只存实际值,用huffbit来存使用的bits数
+        //00 -> all zero
+        if(values[i] == 0){
+            // words[i] = values[i] + 0x0;
+            words[i] = values[i] + strtol(huffTree2.veccode[name[0]].c_str(),NULL,2);
+            // wordPos[i] = 1;
+            wordPos[i] = 0;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree2.veccode[name[0]].size();
+            continue;
+        }
+
+        // 01 8bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFF){
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree2.veccode[name[1]].c_str(),NULL,2)<<8);
+            wordPos[i] = 3;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree2.veccode[name[1]].size();
+            continue;
+        }
+        if(my_abs((int)(values[i])) <= 0xF){
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree2.veccode[name[7]].c_str(),NULL,2)<<4);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=2;
+            huffbit += huffTree2.veccode[name[7]].size();
+            continue;
+        }
+        // 110 16bits符号扩展
+        if(my_abs((int)(values[i])) <= 0xFFFF){
+            // words[i] = my_abs((int)(values[i])) + 0x40000;
+            words[i] = my_abs((int)(values[i])) + (strtol(huffTree2.veccode[name[2]].c_str(),NULL,2)<<16);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree2.veccode[name[2]].size();
+            continue;
+        }
+        //100  32bits
+        if(((values[i]) & 0xFFFF) == 0 ){
+            // words[i] = (values[i] >> 16) + 0x40000;
+            words[i] = (values[i] >> 16) + (strtol(huffTree2.veccode[name[3]].c_str(),NULL,2)<<16);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree2.veccode[name[3]].size();
+            continue;
+        }
+        //101 00ab00cd类
+        if( my_abs((int)((values[i]) & 0xFFFF)) <= 0xFF
+             && my_abs((int)((values[i] >> 16) & 0xFFFF)) <= 0xFF){
+            words[i] = my_abs((int)((values[i] >> 8))) + my_abs((int)((values[i]) & 0xFFFF)) + (strtol(huffTree2.veccode[name[4]].c_str(),NULL,2)<<32);
+            wordPos[i] = 4;
+            comSize += wordPos[i];
+            // huffbit +=3;
+            huffbit += huffTree2.veccode[name[4]].size();
+            continue;
+        }
+        //1110 重复类
+        uint64_t byte0 = (values[i]) & 0xFF;
+        uint64_t byte1 = (values[i] >> 8) & 0xFF;
+        uint64_t byte2 = (values[i] >> 16) & 0xFF;
+        uint64_t byte3 = (values[i] >> 24) & 0xFF;
+        if(byte0 == byte1 && byte0 == byte2 && byte0 == byte3){
+            words[i] = byte0 +  (strtol(huffTree2.veccode[name[5]].c_str(),NULL,2)<<8);
+            wordPos[i] = 2;
+            comSize += wordPos[i];
+            // huffbit +=4;
+            huffbit += huffTree2.veccode[name[5]].size();
+            continue;
+        }
+        //1111
+        words[i] = values[i];
+        wordPos[i] = 8;
+        //这里huffbit不用加因为有一bit是是否压缩的
+        comSize += wordPos[i];
+    }
+    }
+    
     //这里我们把prefix加上去
-    std::cout << "now huffbit is"<<huffbit <<std::endl;
+    // std::cout << "now huffbit is"<<huffbit <<std::endl;
     comSize += huffbit/4;
     if (comSize==0)
         comSize=1;
@@ -1897,7 +1990,7 @@ bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
 	{
         if (buildtree==false){
             printf("我们终于新建了一棵树\n");
-            buildtree = BuildHuffTree(huffTree1,mapCh1);
+            buildtree = BuildHuffTree(huffTree1,mapCh1,huffTree2,mapCh2);
             //这里我们新建一棵树
         }
         if(sample_flag)
@@ -1908,20 +2001,92 @@ bool FRFCFS::HDFPCCompress(NVMainRequest *request, uint64_t _blockSize )
 	}
 }
 
-bool FRFCFS::BuildHuffTree(HuffmanTree &huffTree1,map<char, uint64_t> &mapCh1)
+int FRFCFS::KLCAL(uint64_t real[9],uint64_t stan1[9],uint64_t stan2[9])
+{
+    //1代表stan1更接近，2代表stan2更接近
+    uint64_t total1 = 0;
+    uint64_t total2 = 0;
+    uint64_t total3 = 0;
+
+    for(int i=1;i<7;i++){
+        total1 += real[i];
+        total2 += stan1[i];
+        total3 += stan2[i];
+
+    }
+    double klscore1 = 0;
+    double klscore2 = 0;
+    double px[6] = {0};
+    double qx[6] = {0};
+    double q2x[6] = {0};
+    for (int i=1;i<7;i++){
+        px[i-1] = real[i]/total1;
+        qx[i-1] = stan1[i]/total2; 
+        q2x[i-1] = stan2[i]/total3; 
+        klscore1 += px[i-1] *log(px[i-1]/qx[i-1]);
+        klscore2 += px[i-1] *log(px[i-1]/q2x[i-1]);
+    }
+    if(klscore1 < klscore2){
+        return 1;
+    }
+    else{
+        return 2;
+    }
+
+
+}
+
+bool FRFCFS::BuildHuffTree(HuffmanTree &huffTree1,map<char, uint64_t> &mapCh1,HuffmanTree &huffTree2,map<char, uint64_t> &mapCh2)
 {
     char name[8] = {'a','b','c','d','e','f','g','h'};
     
     // map<char, uint64_t> mapCh1;
+    std::cout<<"changed: "<<std::endl;
 
     for (int i = 0; i < 8; i++)
     {   
+        pattern_ana0[i] = pattern_ana[i];
         std::cout << "pattern"<<pattern_ana[i] <<std::endl;
         mapCh1.insert(map<char,uint64_t>::value_type(name[i],pattern_ana[i]));
     }
     // HuffmanTree huffTree1;
+    int mn[2] = {INT_MAX, INT_MAX}, mx[2] = {INT_MIN, INT_MIN};
+	int mni[2] = {-1, -1}, mxi[2] = {-1, -1};
+	for (int i = 0; i < 8; ++i) {
+		if (pattern_ana[i] < mn[0]) {
+			mn[1] = mn[0];
+			mni[1] = mni[0];
+			mn[0] = pattern_ana[i];
+			mni[0] = i;
+		} else if (pattern_ana[i] < mn[1]) {
+			mn[1] = pattern_ana[i];
+			mni[1] = i;
+		}
+		if (pattern_ana[i] > mx[0]) {
+			mx[1] = mx[0];
+			mxi[1] = mxi[0];
+			mx[0] = pattern_ana[i];
+			mxi[0] = i;
+		} else if (pattern_ana[i] > mx[1]) {
+			mx[1] = pattern_ana[i];
+			mxi[1] = i;
+		}
+	}
+	if (mni[0] != -1 && mxi[0] != -1) {
+		swap(pattern_ana[mni[0]], pattern_ana[mxi[0]]);
+	}
+	if (mni[1] != -1 && mxi[1] != -1) {
+		swap(pattern_ana[mni[1]], pattern_ana[mxi[1]]);
+	}
+    std::cout<<"changed: "<<std::endl;
+    for (int i = 0; i < 8; i++)
+    {   
+        pattern_ana2[i] = pattern_ana[i];
+        std::cout << pattern_ana[i] << "\t"<<std::endl;
+        mapCh2.insert(map<char,uint64_t>::value_type(name[i],pattern_ana[i]));
+    }
 
-    huffTree1.Input(mapCh1);
+    huffTree2.Input(mapCh2);
 
     return true;
 }
